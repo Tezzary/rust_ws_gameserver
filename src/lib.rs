@@ -6,7 +6,7 @@ use std::thread;
 use tokio::net::TcpListener;
 
 use futures_util::{StreamExt, SinkExt};
-use std::sync::mpsc;
+use tokio::sync::mpsc;
 
 pub struct Connection {
     pub send_to_client: mpsc::Sender<Message>,
@@ -15,13 +15,13 @@ pub struct Connection {
 
 impl Connection {
     pub fn send_text(&self, string: &str) -> bool {
-        match self.send_to_client.send(Message::text(string)) {
+        match self.send_to_client.blocking_send(Message::text(string)) {
             Ok(_) => return true,
             Err(_) => return false
         }
     }
     pub fn send_bytes(&self, vec: &Vec<u8>) -> bool{
-        match self.send_to_client.send(Message::binary(Bytes::copy_from_slice(vec))) {
+        match self.send_to_client.blocking_send(Message::binary(Bytes::copy_from_slice(vec))) {
             Ok(_) => return true,
             Err(_) => return false
         }
@@ -29,7 +29,7 @@ impl Connection {
 }
 pub fn run(port: i32) -> mpsc::Receiver<Connection> {
 
-    let (send_new_connection, receive_new_connections) = mpsc::channel::<Connection>();
+    let (send_new_connection, receive_new_connections) = mpsc::channel::<Connection>(100);
 
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to start tokio runtime");
@@ -41,8 +41,8 @@ pub fn run(port: i32) -> mpsc::Receiver<Connection> {
 
                 let (mut write_stream, mut read_stream) = stream.split();
 
-                let (send_to_main_thread, receive_from_client) = mpsc::channel::<Message>();
-                let (send_to_client, send_to_client_transmitter) = mpsc::channel::<Message>();
+                let (send_to_main_thread, receive_from_client) = mpsc::channel::<Message>(32);
+                let (send_to_client, mut send_to_client_transmitter) = mpsc::channel::<Message>(32);
                 
                 let send_to_client_reference = send_to_client.clone();
                 //listener
@@ -51,16 +51,16 @@ pub fn run(port: i32) -> mpsc::Receiver<Connection> {
                         let message = read_stream.next().await.expect("Failed to get message").expect("Failed to unpack message");
                         match message {
                             Message::Text(text) => {
-                                send_to_main_thread.send(Message::Text(text)).unwrap();
+                                send_to_main_thread.send(Message::Text(text)).await.unwrap();
                                 //let string = text.as_str().to_owned();
                                 
                                // println!("{}", string);
                             },
                             Message::Ping(_bytes) => {
-                                send_to_client_reference.send(Message::Pong(Bytes::from("Pong from server!!!!"))).expect("Failed to send to send thread");
+                                send_to_client_reference.send(Message::Pong(Bytes::from("Pong from server!!!!"))).await.expect("Failed to send to send thread");
                             },
                             Message::Binary(bytes) => {
-                                send_to_main_thread.send(Message::Binary(bytes)).unwrap();
+                                send_to_main_thread.send(Message::Binary(bytes)).await.unwrap();
                             }
                             _ => {
                                 println!("Unrecognised Data format");
@@ -72,7 +72,7 @@ pub fn run(port: i32) -> mpsc::Receiver<Connection> {
                 //sender
                 tokio::spawn(async move {
                     loop {
-                        let message: Message = send_to_client_transmitter.recv().unwrap();
+                        let message: Message = send_to_client_transmitter.recv().await.unwrap();
                         write_stream.send(message).await.expect("Failed to send message");
                     }
                 });
@@ -82,7 +82,7 @@ pub fn run(port: i32) -> mpsc::Receiver<Connection> {
                     send_to_client,
                     receive_from_client
                 };
-                send_new_connection.send(connection).expect("Failed to send connection to main thread");
+                send_new_connection.send(connection).await.expect("Failed to send connection to main thread");
             }
         });
     });
