@@ -14,11 +14,17 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn send_text(&self, string: &str) {
-        self.send_to_client.send(Message::text(string)).unwrap();
+    pub fn send_text(&self, string: &str) -> bool {
+        match self.send_to_client.send(Message::text(string)) {
+            Ok(_) => return true,
+            Err(_) => return false
+        }
     }
-    pub fn send_bytes(&self, vec: &Vec<u8>) {
-        self.send_to_client.send(Message::binary(Bytes::copy_from_slice(vec))).unwrap();
+    pub fn send_bytes(&self, vec: &Vec<u8>) -> bool{
+        match self.send_to_client.send(Message::binary(Bytes::copy_from_slice(vec))) {
+            Ok(_) => return true,
+            Err(_) => return false
+        }
     }
 }
 pub fn run(port: i32) -> mpsc::Receiver<Connection> {
