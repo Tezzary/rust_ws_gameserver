@@ -1,7 +1,6 @@
 use tokio;
 use tokio_tungstenite;
 pub use tungstenite::protocol::Message;
-use tungstenite::protocol::frame::Utf8Bytes;
 use tungstenite::Bytes;
 use std::thread;
 use tokio::net::TcpListener;
@@ -17,6 +16,9 @@ pub struct Connection {
 impl Connection {
     pub fn send_text(&self, string: &str) {
         self.send_to_client.send(Message::text(string)).unwrap();
+    }
+    pub fn send_bytes(&self, vec: &Vec<u8>) {
+        self.send_to_client.send(Message::binary(Bytes::copy_from_slice(vec))).unwrap();
     }
 }
 pub fn run(port: i32) -> mpsc::Receiver<Connection> {
@@ -43,7 +45,7 @@ pub fn run(port: i32) -> mpsc::Receiver<Connection> {
                         let message = read_stream.next().await.expect("Failed to get message").expect("Failed to unpack message");
                         match message {
                             Message::Text(text) => {
-                                send_to_main_thread.send(Message::Text(text));
+                                send_to_main_thread.send(Message::Text(text)).unwrap();
                                 //let string = text.as_str().to_owned();
                                 
                                // println!("{}", string);
@@ -51,6 +53,9 @@ pub fn run(port: i32) -> mpsc::Receiver<Connection> {
                             Message::Ping(_bytes) => {
                                 send_to_client_reference.send(Message::Pong(Bytes::from("Pong from server!!!!"))).expect("Failed to send to send thread");
                             },
+                            Message::Binary(bytes) => {
+                                send_to_main_thread.send(Message::Binary(bytes)).unwrap();
+                            }
                             _ => {
                                 println!("Unrecognised Data format");
                             }
